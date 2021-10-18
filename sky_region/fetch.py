@@ -5,7 +5,7 @@ import os
 
 #TODO: What to do with the label column?
 
-def fetch(csv, output_dir, id_df_path, survey):
+def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
   """
   Download the galaxys from the file given in "csv" and store then in the "output_dir".
   
