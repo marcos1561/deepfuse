@@ -10,11 +10,23 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
   Download the galaxys from the file given in "csv" and store then in the "output_dir".
   
   Parameters:
-    csv: .csv with the coordenates of the images to download.
-    output_dir: The directory to save de images.
-    id_df_path: is the path to .csv file that contains all galaxys already downloaded properly.
-  This file will be used to verify if a given galaxy needs to be downloaded.
-    survey: The survey where the images are downloaded.
+  ---------- 
+  csv: str
+    csv file with the coordenates of the images to download.
+  
+  output_dir: str 
+    The directory to save de images.
+  
+  id_df_path: str
+    The path to .csv file that contains all galaxys already downloaded properly.
+    This file will be used to verify if a given galaxy needs to be downloaded.
+  
+  survey: str
+    The survey where the images are downloaded.
+
+  Return:
+    error_occur: bool
+      True if some error occurred during download, false otherwise.
 
   Exemple of usage::
 
@@ -28,8 +40,9 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
       test = '/content/drive/My Drive/Deepfuse/data/test.csv'
       test_dir = '/content/drive/My Drive/Deepfuse/data/test-ps'
       fetch(test, test_dir, '/content/drive/My Drive/Deepfuse/data/id-test-ps.csv', survey="ls-dr9")
-  
   """
+  error_occur = False
+
   os.makedirs(output_dir, exist_ok=True)
   df = pd.read_csv(csv, index_col=0)
 
@@ -63,6 +76,7 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
             urllib.request.urlretrieve(legacy_survey, os.path.join(output_dir, candidate))
           except urllib.error.HTTPError as e:
             print(e)
+            error_occur = True
             continue
 
           id_df.loc[i, 'name'] = candidate
@@ -84,6 +98,7 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
         continue
       except Exception as e:
         print(e)
+        error_occur = True
         continue
 
       id_df.loc[i, 'name'] = candidate
@@ -92,6 +107,8 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
       id_df['label'] = id_df['label'].astype(int)
       id_df.to_csv(id_df_path)
       print('csv saved')
+
+  return error_occur
 
 ##### TEST #####
 # cwd = os.getcwd()
