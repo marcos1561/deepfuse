@@ -272,7 +272,7 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
                 Center position of upper right cutout.
     '''
 
-    print("\n Generating mosaic segments...")
+    print("\nGenerating mosaic cutouts...")
 
     orig_header = wcs_out.to_header()
 
@@ -293,7 +293,7 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
     print("mosaic shape: ", shape_out)
     print("num_images_per_row: ", num_images_per_row)
     print("num_images_per_column: ", num_images_per_column)
-    print(f"Mosaic cuts: {cuts}")
+    print(f"Mosaic cuts: {cuts}\n")
 
     # The coordinate origin is in the mosaic lower left corner 
     # and the segments center coordinates must be in the form (x, y)
@@ -332,7 +332,11 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
 
         # Save position for later use. (plot all mosaic elements using matplotlib)
         pd.DataFrame(mosaic_pos).to_csv(os.path.join(dest_dir, "mosaic_pos.csv"))
-    print("Cutouts Created!")
+    if num_images_per_column > 0 and num_images_per_row > 0:
+        print("Cutouts Created!")
+    else:
+        print("It was not possible to generate cutouts in this segment"
+              "(probably cutout_size is bigger than some mosaic dimention)\n")
 
     return num_images_per_column, num_images_per_row, cen
 
@@ -362,7 +366,6 @@ def visualize_mosaic_cutouts(mosaic_seg_path, nrows, ncols, mosaic_array, sharex
     '''Plot mosaic segments for debugging purposes
     '''
     if nrows == 0 or ncols == 0:
-        print("\nIt was not possible to generate cutouts in this segment\n")
         return
 
     # File containg the correct postion for plotting
@@ -450,40 +453,35 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
     total_ims_per_col = region_shape[0]
     total_ims_per_row = region_shape[1]
 
-    # Since there is overlap, we need to maintein some rows of the last segment and some
-    # columns of right neighbor segment. For now is being manteined the number of the images 
-    # that one cutout can be in.
-    num_ims_keep = int(np.ceil(cutout_size/LEGACY_IM_SIZE))
-    num_row_keep = num_ims_keep
-    num_col_keep = num_ims_keep
-    print(f"num_row_maintein: {num_row_keep} | num_col_mantein: {num_col_keep}")
-
-    # line_cut and col_cut are the limits of the segment that are not necessary for the cutouts 
-    # ( it was already used in previous segments). For example, line_cut = 10, col_cut = 50 will 
-    # cut the first 10 lines and 50 columns. (origin is in lower left corner)
-    line_cut = 0
-    col_cut = 0
-
     # This loop walks between the segmetns. col_i and row_i containg the grid coordinate (for 
     # example (0,3) is the image in the first column and the 4th row) of the lower
     # left image of the segment.
-    for col_i in range(0, total_ims_per_row - num_col_keep, kernel_shape[1] - num_col_keep):
+    #
+    # line_cut and col_cut are the limits of the segment that are not necessary for the cutouts 
+    # ( it was already used in previous segments). For example, line_cut = 10, col_cut = 50 will 
+    # cut the first 10 lines and 50 columns. (origin is in lower left corner)
+    #
+    # Since there is overlap, we need to maintein some rows of the last segment and some
+    # columns of the left neighbor segment. This information is stored in num_col_keep and num_row_keep
+    
+    col_i = 0
+    num_col_keep = 0 
+    col_cut = 0
+    while col_i < total_ims_per_row - num_col_keep:
         mosaic_ims = [] # List containing the images of the current segment
         ims_names_debug = [] # List containing the images grid coordinates for debugging purposes
         
-        for row_i in range(0, total_ims_per_col - num_row_keep, kernel_shape[0] - num_row_keep):
+        row_i = 0
+        num_row_keep = 0
+        line_cut = 0
+        while row_i < total_ims_per_col - num_row_keep:
             print(f"\n#### Mosaic lower left corner: {col_i}, {row_i} ###")
-            if row_i == 0: # There is no need to keep rows in the first row.
-                num_row_keep = 0
-            else:
-                num_row_keep = num_ims_keep
-
-            if row_i > 0:
-                ims_names_debug = ims_names_list[-num_row_keep:]
-
+            print(f"\nNum_row_keeped: {num_row_keep} | Num_col_keeped: {num_col_keep}")
+            
             # Get the names of the images that will form the current segment. The names are
             # stored in a grid (2d array), equal to the grid they form when combined to generate the segment.
             ims_names_list = []
+            ims_names_debug = ims_names_list[-num_row_keep:]
             for i in range(row_i + num_row_keep, row_i + kernel_shape[0]):
                 ims_names_row = []
                 for j in range(col_i, col_i + kernel_shape[1]):
@@ -492,14 +490,13 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                     ims_names_row.append(f"{j}_{i}.fits")
                 ims_names_list.append(ims_names_row)
             
-
             ims_names_debug = [*ims_names_debug, *ims_names_list]
             print(f"Ims: {ims_names_debug}")
 
             # Loads the images that will form the current segment. The images are stored
             # in the same structure of "ims_names_list"
-            if row_i > 0: # Keeps rows from last segment that will be needed for this segment 
-                mosaic_ims = mosaic_ims[-num_row_keep:]
+            # Keeps rows from last segment that will be needed for this segment 
+            mosaic_ims = mosaic_ims[-num_row_keep:]
             for ims_row in ims_names_list:
                 mosaic_ims_row = []
                 for im_name in ims_row:
@@ -508,22 +505,21 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                         mosaic_ims_row.append(fits.HDUList(im_file[0].copy()))
                 mosaic_ims.append(mosaic_ims_row)
             
-            # Combine segment's images to generata a mosaic
-            array, footprint, wcs_out, shape_out = generate_mosaic(mosaic_ims)
 
             # Based on the upper right cutout generated in the last mosaic and the last mosaic shape, calculates the rows and
             # columns tha will not be needed for this mosaic 
             if row_i > 0: # line cut
                 line_cut = last_up_right_pos[1] + cutout_size*(0.5 - overlap) - last_shape_out[0] + num_row_keep * LEGACY_IM_SIZE
-            else:
-                line_cut = 0
 
             # Since mosaics are created from the bottom up, giving them coordinates ( 0,0 is the lower left mosaic ), 
             # column cuts of mosaic that are in column n are calculated based on the last mosaic in column n-1.
             if col_i > 0 and row_i == 0: # col cut
                 col_cut = last_up_right_pos[0] + cutout_size*(0.5 - overlap) - last_shape_out[1] + num_col_keep * LEGACY_IM_SIZE
+            
             cuts = {"line":line_cut, "col":col_cut}
 
+            # Combine segment's images to generate a mosaic
+            array, footprint, wcs_out, shape_out = generate_mosaic(mosaic_ims)
             last_shape_out = shape_out
             
             # Generate cutouts
@@ -536,7 +532,27 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
 
             # TODO: Some pixels are missing from the edge of the images, a possible solution 
             # would be to make the equatorial coordinates of the center of the images a little bit closer.
-            # visualize_mosaic(array, footprint)
-            # visualize_mosaic_segments(mosaic_seg_dir, ncols, nrows, array)
-            
+            visualize_mosaic(array, footprint)
+            visualize_mosaic_cutouts(mosaic_seg_dir, ncols, nrows, array)
+
             plt.show()
+
+            # Number of rows to keep in the next segment 
+            # upper_cutout_y is the y position (in this segment) from lower edge of the next cutout 
+            # above the upper right cutout in this segment
+            if not(ncols == 0 or nrows == 0):
+                upper_cutout_y = up_right_pos[1] + cutout_size*(0.5 - overlap)
+                num_row_keep = ceil((shape_out[0] - upper_cutout_y) / LEGACY_IM_SIZE)
+                row_i += kernel_shape[0] - num_row_keep
+            else:
+                row_i += kernel_shape[0]
+        
+        # Number of columns to keep in the next segment 
+        # right_cutout_x is the x position (in this segment) from the left edge 
+        # of the next cutout to the right of the top right cutout in this segment
+        if not(ncols == 0 or nrows == 0):
+            right_cutout_x = up_right_pos[0] + cutout_size*(0.5 - overlap)
+            num_col_keep = ceil((shape_out[1] - right_cutout_x) / LEGACY_IM_SIZE)
+            col_i += kernel_shape[1] - num_col_keep
+        else:
+            col_i += kernel_shape[1]

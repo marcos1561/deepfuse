@@ -22,8 +22,8 @@ height = ps.value/(60*60)*(256*5) * u.deg # Region hight
 center_pos = (210.8002 * u.deg, 54.3478 * u.deg ) # (ra, dec) - Region center
 
 # Cutouts setup
-kernel_shape = (4, 3) # num lines, num cols. Shape of the images to generate the mosaic for cutouts 
-cutout_size = 300 # pixels
+kernel_shape = (3, 3) # num lines, num cols. Shape of the images to generate the mosaic for cutouts 
+cutout_size = int(1 * functions.LEGACY_IM_SIZE) # pixels
 overlap_percentage = 0.1
 slice = 0
 
