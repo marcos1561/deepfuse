@@ -17,9 +17,9 @@ ims_id_file = os.path.join(main_dir, "ims_id.csv") # file with images already co
 
 # Images to download setup
 ps = 0.7 * u.arcsec
-length = ps.value/(60*60)*(256*4) * u.deg # Region length
-height = ps.value/(60*60)*(256*5) * u.deg # Region hight
-center_pos = (210.8002 * u.deg, 54.3478 * u.deg ) # (ra, dec) - Region center
+length = ps.value/(60*60)*(256*5) * u.deg # Region length
+height = ps.value/(60*60)*(256*4) * u.deg # Region hight
+center_pos = (170.5717 * u.deg, 14.1776 * u.deg ) # (ra, dec) - Region center
 
 # Cutouts setup
 kernel_shape = (3, 3) # num lines, num cols. Shape of the images to generate the mosaic for cutouts 

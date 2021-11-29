@@ -1,3 +1,4 @@
+from genericpath import exists
 from astropy.io import fits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -89,7 +90,7 @@ def view_points(points):
     plt.show()
 
 
-def generate_equatorial_coords(center_pos, length, height, ps):
+def generate_equatorial_coords(center_pos, length, height, ps_original):
     '''Generates the images center equatorial coordiantes in the specify region
     to download in legacy survey.
     First the points are created centered in the origin. The limits are 
@@ -123,6 +124,8 @@ def generate_equatorial_coords(center_pos, length, height, ps):
         region_shape: (int, int)
             Tuple containing the number of images in each column and row, respectively.
     '''
+    # Reduce pixel scale for preventing empty pixel between images
+    ps = (LEGACY_IM_SIZE-2)/LEGACY_IM_SIZE * ps_original
 
     # Angular length (in rad) of the images to be downloaded
     img_length = ps.to(u.rad).value * LEGACY_IM_SIZE 
@@ -235,7 +238,7 @@ def generate_mosaic(mosaic_im):
     return array, footprint, wcs_out, shape_out
 
 
-def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_size, overlap_percentage):
+def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_size, overlap_percentage, lower_left_grid_coord = (0, 0)):
     '''Generates cutouts with overlap in the mosaic provided by "array".
 
     Parameters:
@@ -260,6 +263,10 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
         overlap_percentage: float
             Percentage of overlap between cutouts (0. = completely new cutout, no overlap; 1. = same cutout, total overlap).
 
+        last_lower_left_grid_coord: tuple
+            Last grid coordinte of the lower left cutout of this segment. This is usefull if we 
+            have more than one segment.
+        
         Return:
         -------
             num_images_per_column: int
@@ -277,19 +284,13 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
     orig_header = wcs_out.to_header()
 
     # Dict to store segmets positions for later use in plotting.
-    mosaic_pos = {"row": [], "col": [], "name": []}
-
-    if os.path.exists(dest_dir):
-        for f in os.listdir(dest_dir): # Removes existing cutouts if it exists
-            os.remove(os.path.join(dest_dir, f))
-    else:
-        os.makedirs(dest_dir)
+    # mosaic_pos = {"row": [], "col": [], "name": []}
 
     cutout = (cutout_size, cutout_size) 
     overlap = cutout_size * (1-overlap_percentage) # if cutout_size = 500 px, setting overlap = 0.2 would leave 100 pixels overlapping 
     num_images_per_column = floor((shape_out[0] - cuts["line"])/overlap)
     num_images_per_row = floor((shape_out[1] - cuts["col"])/overlap)
-
+    
     print("mosaic shape: ", shape_out)
     print("num_images_per_row: ", num_images_per_row)
     print("num_images_per_column: ", num_images_per_column)
@@ -298,7 +299,6 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
     # The coordinate origin is in the mosaic lower left corner 
     # and the segments center coordinates must be in the form (x, y)
     x_pos = cuts["col"] + ceil(cutout_size/2)
-    cen = ()
     for i in range(num_images_per_row): # changes the x coodr
         y_pos = cuts["line"] + ceil(cutout_size/2)
         for j in range(num_images_per_column): # changes the y coord
@@ -309,13 +309,13 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
             
             # checks if the segment has values other than 0, ignores the CCD parts with no good pixels
             if not np.all((segment.data == 0)): # returns True if all zeros, use "not" in front of it to look at the segments with other values only
-                seg_name = f"{int(cen[0])}_{int(cen[1])}.fits"
+                seg_name = f"{i + lower_left_grid_coord[0]}_{j + lower_left_grid_coord[1]}.fits"
 
                 # Position for later use (plot all mosaic elements using matplotlib)
-                mosaic_pos["name"].append(seg_name)
-                pos = (num_images_per_column -1 - j, i)
-                mosaic_pos["row"].append(pos[0])
-                mosaic_pos["col"].append(pos[1])
+                # mosaic_pos["name"].append(seg_name)
+                # pos = (num_images_per_column -1 - j, i)
+                # mosaic_pos["row"].append(pos[0])
+                # mosaic_pos["col"].append(pos[1])
                 
                 header_new = segment.wcs.to_header()
             
@@ -331,7 +331,8 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
         x_pos += overlap
 
         # Save position for later use. (plot all mosaic elements using matplotlib)
-        pd.DataFrame(mosaic_pos).to_csv(os.path.join(dest_dir, "mosaic_pos.csv"))
+        # pd.DataFrame(mosaic_pos).to_csv(os.path.join(dest_dir, "mosaic_pos.csv"))
+    
     if num_images_per_column > 0 and num_images_per_row > 0:
         print("Cutouts Created!")
     else:
@@ -447,11 +448,11 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
     -------
         None
     '''
-    # TODO: Calculating row cut in each mosaic will make the algorith more efficient
-
     print("\n####### Walking throught images #########")
     total_ims_per_col = region_shape[0]
     total_ims_per_row = region_shape[1]
+
+
 
     # This loop walks between the segmetns. col_i and row_i containg the grid coordinate (for 
     # example (0,3) is the image in the first column and the 4th row) of the lower
@@ -464,10 +465,26 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
     # Since there is overlap, we need to maintein some rows of the last segment and some
     # columns of the left neighbor segment. This information is stored in num_col_keep and num_row_keep
     
+    # This is used to correctly name the cutouts
+    lower_left_grid_coord = (0,0) 
+    
+    # Path to store the segments
+    mosaic_seg_dir = os.path.join(main_dir, f"cutouts") 
+    if os.path.exists(mosaic_seg_dir):
+        for f in os.listdir(mosaic_seg_dir): # Removes existing cutouts if it exists
+            os.remove(os.path.join(mosaic_seg_dir, f))
+    else:
+        os.makedirs(mosaic_seg_dir)
+
     col_i = 0
     num_col_keep = 0 
     col_cut = 0
     while col_i < total_ims_per_row - num_col_keep:
+        if col_i != 0:
+            new_col = True # This variable is used to correctly name the cutouts
+        else:
+            new_col = False
+
         mosaic_ims = [] # List containing the images of the current segment
         ims_names_debug = [] # List containing the images grid coordinates for debugging purposes
         
@@ -523,17 +540,32 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
             last_shape_out = shape_out
             
             # Generate cutouts
-            mosaic_seg_dir = os.path.join(main_dir, f"cutout_dir/{col_i}_{row_i}") # mosaic cutouts path
-            ncols, nrows, up_right_pos = generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, mosaic_seg_dir, cutout_size, overlap)
+            # mosaic_seg_dir = os.path.join(main_dir, f"cutout_dir/{col_i}_{row_i}") # mosaic cutouts path
             
+            # Recalculates the grid coordinate of the lower left cutout of this segment.
+            # It only needs to recalculate if it's not the first time generating cutouts. This is
+            # done checking if we are not in the first line and first column of the images. 
+            if row_i != 0 or col_i != 0:
+                if new_col:
+                    x_coord = last_lower_left_grid_coord[0] + nrows
+                    y_coord = 0
+                else:
+                    x_coord = last_lower_left_grid_coord[0]
+                    y_coord = last_lower_left_grid_coord[1] + ncols
+                lower_left_grid_coord = (x_coord, y_coord)
+
+            ncols, nrows, up_right_pos = generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, mosaic_seg_dir, cutout_size, overlap, lower_left_grid_coord)
+            
+            last_lower_left_grid_coord = lower_left_grid_coord
+
             # TODO: It's possible to ncols our nrows be 0 when cutout_size > LEGACY_IM_SIZE. Fix this pls.   
             if not(ncols == 0 or nrows == 0):
                 last_up_right_pos = up_right_pos
 
             # TODO: Some pixels are missing from the edge of the images, a possible solution 
             # would be to make the equatorial coordinates of the center of the images a little bit closer.
-            visualize_mosaic(array, footprint)
-            visualize_mosaic_cutouts(mosaic_seg_dir, ncols, nrows, array)
+            # visualize_mosaic(array, footprint)
+            # visualize_mosaic_cutouts(mosaic_seg_dir, ncols, nrows, array)
 
             plt.show()
 
@@ -546,6 +578,9 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                 row_i += kernel_shape[0] - num_row_keep
             else:
                 row_i += kernel_shape[0]
+
+            # We no longer are in a new column
+            new_col = False
         
         # Number of columns to keep in the next segment 
         # right_cutout_x is the x position (in this segment) from the left edge 
