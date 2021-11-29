@@ -540,7 +540,6 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
             last_shape_out = shape_out
             
             # Generate cutouts
-            # mosaic_seg_dir = os.path.join(main_dir, f"cutout_dir/{col_i}_{row_i}") # mosaic cutouts path
             
             # Recalculates the grid coordinate of the lower left cutout of this segment.
             # It only needs to recalculate if it's not the first time generating cutouts. This is
@@ -562,8 +561,6 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
             if not(ncols == 0 or nrows == 0):
                 last_up_right_pos = up_right_pos
 
-            # TODO: Some pixels are missing from the edge of the images, a possible solution 
-            # would be to make the equatorial coordinates of the center of the images a little bit closer.
             # visualize_mosaic(array, footprint)
             # visualize_mosaic_cutouts(mosaic_seg_dir, ncols, nrows, array)
 
