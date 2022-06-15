@@ -1,4 +1,11 @@
-from genericpath import exists
+'''
+    Diversas funções utilizadas nos diversos scripts feitos.
+'''
+
+# Add the path were utils.py is
+import sys
+sys.path.append('./sky_region/lib')
+
 from astropy.io import fits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -12,7 +19,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from math import floor, ceil
+
 import os
+import pickle
+import fetch
 
 LEGACY_IM_SIZE = 256 # Size of the images downloaded from legacy
 
@@ -200,7 +210,7 @@ def generate_sky_region_file(eq_coords, img_idx, ps, file_path):
     ims_df.to_csv(file_path)
 
 
-def generate_mosaic(mosaic_im):
+def generate_mosaic(mosaic_im, verbose=False):
     '''Generates a mosaic of .fits images and return the mosaic data array.
 
     Parameters:
@@ -216,10 +226,10 @@ def generate_mosaic(mosaic_im):
         footprint: 2d-array
             Array containg the number of contribution of each pixel.
 
-        wcs : ~astropy.wcs.WCS
+        wcs: ~astropy.wcs.WCS
             The optimal WCS determined from the input images. 
          
-        shape : tuple
+        shape: tuple
             The optimal shape required to cover all the output.
     '''
     print("\nGenerating mosaic...")
@@ -228,17 +238,19 @@ def generate_mosaic(mosaic_im):
     if type(mosaic_im[0]) == list: 
         mosaic_im = [item for sublist in mosaic_im for item in sublist]
 
-    print("Finding optimal wcs..")
+    if verbose:
+        print("Finding optimal wcs..")
     wcs_out, shape_out = find_optimal_celestial_wcs(mosaic_im)
 
-    print("Creating mosaic...")
+    if verbose:
+        print("Creating mosaic...")
     array, footprint = reproject_and_coadd(mosaic_im, wcs_out, shape_out=shape_out, reproject_function=reproject_interp)
     print("Mosaic created")
 
     return array, footprint, wcs_out, shape_out
 
 
-def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_size, overlap_percentage, lower_left_grid_coord = (0, 0)):
+def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_size, overlap_percentage, lower_left_grid_coord = (0, 0), verbose=False):
     '''Generates cutouts with overlap in the mosaic provided by "array".
 
     Parameters:
@@ -263,9 +275,12 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
         overlap_percentage: float
             Percentage of overlap between cutouts (0. = completely new cutout, no overlap; 1. = same cutout, total overlap).
 
-        last_lower_left_grid_coord: tuple
-            Last grid coordinte of the lower left cutout of this segment. This is usefull if we 
-            have more than one segment.
+        lower_left_grid_coord: tuple
+            Grid coordinte of the lower left cutout of this segment. This is usefull if we 
+            have more than one segment for naming the cutouts acording to it's grid coordinate.
+
+        verbose: bool
+            False by default.
         
         Return:
         -------
@@ -278,8 +293,7 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
             cen: tuple
                 Center position of upper right cutout.
     '''
-
-    print("\nGenerating mosaic cutouts...")
+    print("Generating mosaic cutouts...")
 
     orig_header = wcs_out.to_header()
 
@@ -291,19 +305,22 @@ def generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, dest_dir, cutout_si
     num_images_per_column = floor((shape_out[0] - cuts["line"])/overlap)
     num_images_per_row = floor((shape_out[1] - cuts["col"])/overlap)
     
-    print("mosaic shape: ", shape_out)
-    print("num_images_per_row: ", num_images_per_row)
-    print("num_images_per_column: ", num_images_per_column)
-    print(f"Mosaic cuts: {cuts}\n")
+    if verbose:
+        print("mosaic shape: ", shape_out)
+        print("num_images_per_row: ", num_images_per_row)
+        print("num_images_per_column: ", num_images_per_column)
+        print(f"Mosaic cuts: {cuts}\n")
 
     # The coordinate origin is in the mosaic lower left corner 
     # and the segments center coordinates must be in the form (x, y)
     x_pos = cuts["col"] + ceil(cutout_size/2)
+    cen = (0, 0)
     for i in range(num_images_per_row): # changes the x coodr
         y_pos = cuts["line"] + ceil(cutout_size/2)
         for j in range(num_images_per_column): # changes the y coord
             cen = (x_pos, y_pos)
-            print("processing cutout at position ", str(cen))
+            if verbose:
+                print("processing cutout at position ", str(cen))
 
             segment = Cutout2D(array, position=cen, size=cutout, wcs=wcs_out, copy=True)
             
@@ -402,12 +419,12 @@ def visualize_mosaic_cutouts(mosaic_seg_path, nrows, ncols, mosaic_array, sharex
         # ax[pos[0], pos[1]].set_title(name)
 
 
-def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice, ims_dir, main_dir):
-    '''Walks between segments of the region formed by the images in "ims_dir" and
+def walk_through_region(kernel_shape, region_shape, cutout_size, overlap, bands, ims_dir, main_dir, verbose=False):
+    '''Walks through segments of the region formed by the images in "ims_dir" and
     creates cutouts with overlap in each segment. 
     
     Segments are formed by a group of images of the region. The shape of the segmets are
-    specify by "kernel_shape". It will only form "cutout_size" X "cutout_size" cutouts. 
+    specified by "kernel_shape". It will only form "cutout_size" X "cutout_size" cutouts. 
     
     Start taking the segmente in the lower left corner, next take the segment above and so on.
     When the top of the row is reached, a smaller segmegment is created if possible, 
@@ -435,14 +452,17 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
         overlap: float
             Percentage of overlap.
         
-        slice: int
-            The slice to use in the images (They can have three channels)
+        bands: list
+            List of ints containg the bands to use. 0 = g, 1 = r and 2 = z;
         
         ims_dir: str
             Path to the directory containg the images that form the region.
 
         main_dir: str
             Path to the directory where the cutout will be saved.
+        
+        verbose: bool
+            False by default.
 
     Return:
     -------
@@ -451,8 +471,6 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
     print("\n####### Walking throught images #########")
     total_ims_per_col = region_shape[0]
     total_ims_per_row = region_shape[1]
-
-
 
     # This loop walks between the segmetns. col_i and row_i containg the grid coordinate (for 
     # example (0,3) is the image in the first column and the 4th row) of the lower
@@ -493,7 +511,6 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
         line_cut = 0
         while row_i < total_ims_per_col - num_row_keep:
             print(f"\n#### Mosaic lower left corner: {col_i}, {row_i} ###")
-            print(f"\nNum_row_keeped: {num_row_keep} | Num_col_keeped: {num_col_keep}")
             
             # Get the names of the images that will form the current segment. The names are
             # stored in a grid (2d array), equal to the grid they form when combined to generate the segment.
@@ -508,7 +525,10 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                 ims_names_list.append(ims_names_row)
             
             ims_names_debug = [*ims_names_debug, *ims_names_list]
-            print(f"Ims: {ims_names_debug}")
+            
+            if verbose:
+                print(f"\nNum_row_keeped: {num_row_keep} | Num_col_keeped: {num_col_keep}")
+                print(f"Ims: {ims_names_debug}")
 
             # Loads the images that will form the current segment. The images are stored
             # in the same structure of "ims_names_list"
@@ -518,7 +538,17 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                 mosaic_ims_row = []
                 for im_name in ims_row:
                     with fits.open(os.path.join(ims_dir, im_name), memmap=False) as im_file:
-                        im_file[0].data = im_file[0].data[slice]
+                        im_shape = im_file[0].data.shape
+                        if len(im_shape) > 1:
+                            im_data = np.zeros(im_shape[1:])
+                            
+                            if type(bands) != list:
+                                bands = [bands]
+                                
+                            for band in bands:
+                                im_data += im_file[0].data[band]
+                            im_file[0].data = im_data
+
                         mosaic_ims_row.append(fits.HDUList(im_file[0].copy()))
                 mosaic_ims.append(mosaic_ims_row)
             
@@ -553,7 +583,7 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
                     y_coord = last_lower_left_grid_coord[1] + ncols
                 lower_left_grid_coord = (x_coord, y_coord)
 
-            ncols, nrows, up_right_pos = generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, mosaic_seg_dir, cutout_size, overlap, lower_left_grid_coord)
+            ncols, nrows, up_right_pos = generate_mosaic_cutouts(array, wcs_out, shape_out, cuts, mosaic_seg_dir, cutout_size, overlap, lower_left_grid_coord, verbose)
             
             last_lower_left_grid_coord = lower_left_grid_coord
 
@@ -588,3 +618,148 @@ def walk_throught_region(kernel_shape, region_shape, cutout_size, overlap, slice
             col_i += kernel_shape[1] - num_col_keep
         else:
             col_i += kernel_shape[1]
+
+
+
+def total_space(region_shape):
+    '''
+        Calculate total disk space of the images in GB.
+    '''
+
+    return region_shape[0]*region_shape[1] * 792 / (1e6)
+
+def should_continue(region_shape):
+    '''
+        Ask to the user if the operation shuld continue.
+
+        Return:
+        -------
+            resp: bool
+                True if it's to continue, false otherwise.
+    '''
+
+    space = round(total_space(region_shape), 3)
+    resp = input(f"Total images space (GB): {space}\ncontinue? (y, n):")
+    if resp not in ["y", "n"]:
+        print(f"{resp} is not a valid answer!")
+        resp = input(f"continue? (y, n):")
+    
+    if resp == "y":
+        resp = True
+    else:
+        resp = False
+
+    return resp
+
+
+def download_images(ims_to_download_file, ims_dir, ims_id_file, survey="ls-dr9", always_try_again=True):
+    '''
+        Download images.
+
+        Parameters:
+        -----------
+            ims_to_download_file: str
+                Path to the .csv file with the coordenates of the images to download.
+           
+            ims_dir: str
+                The directory to save de images.
+           
+            ims_id_file: str
+                The path to .csv file that contains all images already downloaded properly. This file will be used to verify if a given image needs to be downloaded.
+           
+            survey: str
+                The survey where the images are downloaded.
+
+        Return:
+        -------
+            download_error: True if some image was not downloaded.
+    '''
+    print("\nDownloading images...")
+
+    # Try to download the images until every image in the file was downloaded
+    download_error = True
+    try_again = "y"
+    while try_again == "y":
+        try_again = "n"
+
+        download_error = fetch.fetch(ims_to_download_file, ims_dir, ims_id_file, survey="ls-dr9")
+        if download_error:
+            print("\n\n-------- Not every image was downloaded --------")
+            if always_try_again:
+                try_again = "y"
+                print("Trying again")
+            else:
+                try_again = input("Try again? (y/n):")
+                if try_again not in ("y", "n"):
+                    print(f"'{try_again}' is not a valid answer!")
+                    try_again = input("Try again? (y/n):")
+
+
+    return download_error
+
+
+def find_angular_shape(n_rows, n_cols, ps):
+    '''
+        Calculate region dimensions given the desire number of imagens in each row and column.
+        
+        Return:
+        -------
+            (length, height): (float, float)
+                Region dimensions in angular length.
+    '''
+    im_length = LEGACY_IM_SIZE * ps 
+    length = im_length * n_rows * 1.05
+    height = im_length * n_cols * 1.05
+    return length, height
+
+
+def find_region_shape(length, height, ps):
+    '''
+        Find region shape given angular shape and pixelscale.
+
+        Return:
+        -------
+            (n_rows, n_cols): (int, int)
+                Region shape
+    '''
+    n_rows = int(round(float(height/(ps*LEGACY_IM_SIZE)), 0))
+    n_cols = int(round(float(length/(ps*LEGACY_IM_SIZE)), 0))
+    return n_rows, n_cols
+
+
+def sats_center(host, sats_path):
+    '''
+        Return sats center eq coords from the host "host".
+        "path" is the path to the file containg the galaxis.   
+    '''
+    sats_df = pd.read_csv(sats_path, index_col=0)
+    host_sats_df = sats_df.loc[sats_df["Host"] == host]
+    host_sats_center_df = host_sats_df[["Name", "RAdeg", "DEdeg"]]
+    host_sats_center_df.set_index("Name", inplace=True)
+    # host_sats_df = pd.DataFrame[host_sats_center_df.iloc[] ]
+
+    # sats_center = sat_df.iloc[:,[2,3]]
+    return host_sats_center_df
+
+
+def save_config(main_dir, vars):
+    '''
+        Save configuration used to generate "main_dir".
+    '''
+    with open(os.path.join(main_dir, "config.pkl"), "wb") as f:
+        pickle.dump(vars, f)
+
+
+def load_config(main_dir):
+    '''
+        Load configuration used to generate "main_dir".
+
+        Return:
+        -------
+            vars: list
+                List with variables values
+    '''
+    with open(os.path.join(main_dir, "config.pkl"), 'rb') as f:
+        vars = pickle.load(f)
+  
+    return vars
