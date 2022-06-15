@@ -13,7 +13,7 @@ print(cwd)
 
 ''' Setup '''
 # main directory that will containg everything
-main_dir = os.path.join(cwd, "sky_region/test_region") # Change this to save in other location.
+main_dir = os.path.join(cwd, "test_region") # Change this to save in other location.
 os.makedirs(main_dir, exist_ok=True)
 
 ims_dir = os.path.join(main_dir, "images") # where images are saved
