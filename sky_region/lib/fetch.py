@@ -1,11 +1,16 @@
+'''
+  Baixa as imagens no legacy
+'''
+
 import pandas as pd
 import urllib.request
 import urllib.error
 import os
+from math import ceil
 
 #TODO: What to do with the label column?
 
-def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
+def fetch(csv, output_dir, id_df_path, survey, verbose=False):
   """
   Download the galaxys from the file given in "csv" and store then in the "output_dir".
   
@@ -51,7 +56,15 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
   else:
     id_df = pd.DataFrame({'name':[], 'label':[]})
 
+  counter = 1
+  max_counter = df.shape[0]
+  count_step = ceil(1/10 * max_counter)
+
   for i, row in df.iterrows():
+    counter += 1
+    if counter % count_step == 0:
+      print(f"Progress:{round((counter-1)/max_counter*100, 2)} %") 
+
     candidate = f'{i}.fits'
     ra = row['ra']
     dec = row['dec']  
@@ -70,7 +83,8 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
       # we redownload it
       except Exception as e:
           os.remove(os.path.join(output_dir, candidate))
-          print(f'\nredownloading id={i} ra={ra}, dec={dec}, ps={ps}')
+          if verbose:
+            print(f'\nredownloading id={i} ra={ra}, dec={dec}, ps={ps}')
           legacy_survey = f'https://www.legacysurvey.org/viewer/cutout.fits?ra={ra}&dec={dec}&layer={survey}&pixscale={ps}'
           try:
             urllib.request.urlretrieve(legacy_survey, os.path.join(output_dir, candidate))
@@ -78,22 +92,29 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
             print(e)
             error_occur = True
             continue
+          except Exception as e:
+            print(e)
+            error_occur = True
+            continue 
 
           id_df.loc[i, 'name'] = candidate
           id_df.loc[i, 'label'] = label
 
           id_df['label'] = id_df['label'].astype(int)
           id_df.to_csv(id_df_path)
-          print('csv saved')
+          if verbose:
+            print('csv saved')
             
     # download new candidate
     else:           
-      print(f'\ndownloading id={i} ra={ra}, dec={dec}, ps={ps}')
       legacy_survey = f'https://www.legacysurvey.org/viewer/cutout.fits?ra={ra}&dec={dec}&layer={survey}&pixscale={ps}'
-      print(legacy_survey)
+      if verbose:
+        print(f'\ndownloading id={i} ra={ra}, dec={dec}, ps={ps}')
+        print(legacy_survey)
       try:
         urllib.request.urlretrieve(legacy_survey, os.path.join(output_dir, candidate))
       except urllib.error.HTTPError as e:
+        error_occur = True
         print(e)
         continue
       except Exception as e:
@@ -106,7 +127,8 @@ def fetch(csv, output_dir, id_df_path, survey): # same ps as DECam
 
       id_df['label'] = id_df['label'].astype(int)
       id_df.to_csv(id_df_path)
-      print('csv saved')
+      if verbose:
+        print('csv saved')
 
   return error_occur
 
